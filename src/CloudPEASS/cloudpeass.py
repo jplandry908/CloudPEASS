@@ -190,8 +190,8 @@ class CloudPEASS:
         # Group by affected resources first
         final_resources = {}
         for resource in resources:
-            # Convert CloudResource to dict if needed
-            if isinstance(resource, CloudResource):
+            # Convert CloudResource-like objects to dict if needed (avoid brittle isinstance checks across import paths)
+            if not isinstance(resource, dict) and hasattr(resource, "to_dict"):
                 resource = resource.to_dict()
             
             resource_id = resource["id"]
@@ -613,13 +613,16 @@ class CloudPEASS:
         final_resources = []
         has_admin = False
         for resource in resources:
-            # Handle both CloudResource objects and dictionaries
-            if isinstance(resource, CloudResource):
-                perms = resource.permissions
-                is_admin = resource.is_admin
-            else:
+            # Handle CloudResource-like objects and dictionaries (avoid brittle isinstance checks across import paths)
+            if hasattr(resource, "permissions") and hasattr(resource, "is_admin"):
+                perms = getattr(resource, "permissions")
+                is_admin = getattr(resource, "is_admin")
+            elif isinstance(resource, dict):
                 perms = resource.get("permissions", [])
                 is_admin = resource.get("is_admin", False)
+            else:
+                perms = []
+                is_admin = False
             
             if is_admin:
                 has_admin = True
