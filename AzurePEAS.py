@@ -16,44 +16,8 @@ from src.sensitive_permissions.azure import very_sensitive_combinations, sensiti
 from src.azure.entraid import EntraIDPEASS
 from src.azure.definitions import SHAREPOINT_FOCI_APPS, ONEDRIVE_FOCI_APPS, EMAIL_FOCI_APPS, TEAMS_FOCI_APPS_GRAPH, TEAMS_FOCI_APPS_SKYPE, ONENOTE_FOCI_APPS, CONTACTS_FOCI_APPS, TASKS_FOCI_APPS, FOCI_APPS
 
-AZURE_MALICIOUS_RESPONSE_EXAMPLE = """[
-    {
-        "Title": "Privilege Escalation to arbitrary Managed Identities",
-        "Description": "Using the permissions Microsoft.Compute/virtualMachines/write and Microsoft.ManagedIdentity/userAssignedIdentities/assign/action among others it's possible to escalate privileges to arbitrary Managed Identities by creating a VM, assigning Managed Identities and then get tokens from the assigned Managed Identities from the metadata.",
-        "Commands": "az vm create \\
-                --resource-group Resource_Group_1 \\
-                --name cli_vm \\
-                --image Ubuntu2204 \\
-                --admin-username azureuser \\
-                --generate-ssh-keys \\
-                --assign-identity /subscriptions/<sub-id>/resourcegroups/<res-group>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<mi-name> \\
-                --nsg-rule ssh \\
-                --location centralus",
-        "Permissions": [
-            "Microsoft.Compute/virtualMachines/write",
-            "Microsoft.ManagedIdentity/userAssignedIdentities/assign/action",
-        ],
-    },
-    [...]
-]"""
-
-
-AZURE_SENSITIVE_RESPONSE_EXAMPLE = """[
-    {
-        "permission": "Microsoft.Web/sites/host/listkeys/action",
-        "is_very_sensitive": true,
-        "is_sensitive": false,
-        "description": "This permission allows to list the keys of a web app, which can be used to access sensitive information and modify the code and escalate privleges to the managed identity."
-    },
-    [...]
-]"""
-
-AZURE_CLARIFICATIONS = """- The permission "Microsoft.KeyVault/vaults/secrets/read" allows to list secrets but not to read them. To read asecret you need the permission "Microsoft.KeyVault/vaults/secrets/getSecret/action"."""
-
-
-
 class AzurePEASS(CloudPEASS):
-    def __init__(self, arm_token, graph_token, foci_refresh_token, tenant_id, very_sensitive_combos, sensitive_combos, not_use_ht_ai, num_threads, not_enumerate_m365, skip_entraid, out_path=None, check_only_subs=[], no_ask=False):
+    def __init__(self, arm_token, graph_token, foci_refresh_token, tenant_id, very_sensitive_combos, sensitive_combos, num_threads, not_enumerate_m365, skip_entraid, out_path=None, check_only_subs=[], no_ask=False):
         self.foci_refresh_token = foci_refresh_token
         self.tenant_id = tenant_id
         self.not_enumerate_m365 = not_enumerate_m365
@@ -74,7 +38,7 @@ class AzurePEASS(CloudPEASS):
         self.sharepoint_followed_sites_ids = []
         self.initial_subscriptions = []
         self.check_only_subs = check_only_subs
-        super().__init__(very_sensitive_combos, sensitive_combos, "Azure", not_use_ht_ai, num_threads, AZURE_MALICIOUS_RESPONSE_EXAMPLE, AZURE_SENSITIVE_RESPONSE_EXAMPLE, AZURE_CLARIFICATIONS, out_path)
+        super().__init__(very_sensitive_combos, sensitive_combos, "Azure", num_threads, out_path)
 
         if not self.arm_token and not self.graph_token:
             if self.foci_refresh_token:
@@ -1093,7 +1057,6 @@ if __name__ == "__main__":
     parser.add_argument('--check-only-these-subs', default="", help="In case you just want to check specific subscriptions, provide a comma-separated list of subscription IDs (e.g. 'sub1,sub2')")
     parser.add_argument('--out-json-path', default=None, help="Output JSON file path (e.g. /tmp/azure_results.json)")
     parser.add_argument('--threads', default=5, type=int, help="Number of threads to use")
-    parser.add_argument('--not-use-hacktricks-ai', action="store_true", default=False, help="Don't use Hacktricks AI to suggest attack paths")
     parser.add_argument('--no-ask', action="store_true", default=False, help="Do not ask for user input during execution, use defaults instead")
     
     args = parser.parse_args()
@@ -1194,7 +1157,6 @@ if __name__ == "__main__":
         tenant_id,
         very_sensitive_combinations,  # Ensure these variables are defined in your context
         sensitive_combinations,       # Ensure these variables are defined in your context
-        not_use_ht_ai=args.not_use_hacktricks_ai,
         num_threads=args.threads,
         not_enumerate_m365=args.not_enumerate_m365,
         skip_entraid=args.skip_entraid,

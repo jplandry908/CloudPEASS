@@ -29,44 +29,11 @@ init(autoreset=True)
 
 
 
-GCP_MALICIOUS_RESPONSE_EXAMPLE = """[
-	{
-		"Title": "Escalate Privileges via Compute Engine",
-		"Description": "With compute.instances.setIamPolicy permission, an attacker can grant itself a role with the previous permissions and escalate privileges abusing them. Here is an example adding roles/compute.admin to a Service.",
-		"Commands": "cat <<EOF > policy.json
-bindings:
-- members:
-  - serviceAccount:$SERVER_SERVICE_ACCOUNT
-  role: roles/compute.admin
-version: 1
-EOF
-
-gcloud compute instances set-iam-policy $INSTANCE policy.json --zone=$ZONE"
-		"Permissions": [
-			"compute.instances.setIamPolicy"
-		],
-	},
-	[...]
-]"""
-
-GCP_SENSITIVE_RESPONSE_EXAMPLE = """[
-	{
-		"permission": "cloudfunctions.functions.sourceCodeSet",
-		"is_very_sensitive": true,
-		"is_sensitive": false,
-		"description": "An attacker with this permission could modify the code of a Function to ecalate privileges to the SA used by the function."
-	},
-	[...]
-]"""
-
-GCP_CLARIFICATIONS = ""
-
-
 INVALID_PERMS = {}
 
 
 class GCPPEASS(CloudPEASS):
-	def __init__(self, credentials, extra_token, projects, folders, orgs, sas, very_sensitive_combos, sensitive_combos, not_use_ht_ai, num_threads, out_path, billing_project, proxy, print_invalid_perms, dont_get_iam_policies, skip_bruteforce=False, no_ask=False):
+	def __init__(self, credentials, extra_token, projects, folders, orgs, sas, very_sensitive_combos, sensitive_combos, num_threads, out_path, billing_project, proxy, print_invalid_perms, dont_get_iam_policies, skip_bruteforce=False, no_ask=False):
 		self.credentials = credentials
 		self.extra_token = extra_token
 		self.projects = [p.strip() for p in projects.split(",")] if projects else []
@@ -92,8 +59,7 @@ class GCPPEASS(CloudPEASS):
 		
 		self.all_gcp_perms = self.download_gcp_permissions()
 
-		super().__init__(very_sensitive_combos, sensitive_combos, "GCP", not_use_ht_ai, num_threads,
-						 GCP_MALICIOUS_RESPONSE_EXAMPLE, GCP_SENSITIVE_RESPONSE_EXAMPLE, GCP_CLARIFICATIONS, out_path)
+		super().__init__(very_sensitive_combos, sensitive_combos, "GCP", num_threads, out_path)
 
 	def download_gcp_permissions(self):
 		print(f"{Fore.BLUE}Downloading permissions...")
@@ -1216,7 +1182,7 @@ class GCPPEASS(CloudPEASS):
 		except Exception as e:
 			print(f"{Fore.RED}Error listing emails: {e}")
 if __name__ == "__main__":
-	parser = argparse.ArgumentParser(description="GCPPEASS: Enumerate GCP permissions and check for privilege escalations and other attacks with HackTricks AI.")
+	parser = argparse.ArgumentParser(description="GCPPEASS: Enumerate GCP permissions and check for privilege escalations and other attacks.")
 
 	scope_group = parser.add_mutually_exclusive_group(required=False)
 	scope_group.add_argument('--projects', help="Known project IDs (project names) separated by commas")
@@ -1234,7 +1200,6 @@ if __name__ == "__main__":
 	parser.add_argument('--no-ask', action="store_true", default=False, help="Do not ask for user input during execution, use defaults instead")
 	parser.add_argument('--out-json-path', default=None, help="Output JSON file path (e.g. /tmp/gcp_results.json)")
 	parser.add_argument('--threads', default=5, type=int, help="Number of threads to use")
-	parser.add_argument('--not-use-hacktricks-ai', action="store_true", default=False, help="Don't use Hacktricks AI to suggest attack paths")
 	parser.add_argument('--billing-project', type=str, default="", help="Indicate the billing project to use to brute-force permissions")
 	parser.add_argument('--proxy', type=str, default="", help="Indicate a proxy to use to connect to GCP for debugging (e.g. 127.0.0.1:8080)")
 	parser.add_argument('--print-invalid-permissions', default=False, action="store_true", help="Print found invalid permissions to improve th speed of the tool")
@@ -1255,7 +1220,6 @@ if __name__ == "__main__":
 		creds, args.extra_token, args.projects, args.folders, args.organizations,
 		args.service_accounts,
 		very_sensitive_combinations, sensitive_combinations,
-		not_use_ht_ai=args.not_use_hacktricks_ai,
 		num_threads=args.threads,
 		out_path=args.out_json_path,
 		billing_project=args.billing_project,

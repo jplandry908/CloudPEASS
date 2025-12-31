@@ -4,7 +4,7 @@
 
 Welcome to the **Cloud Privilege Escalation Awesome Script Suite** – your one-stop solution to **find your permissions** whenever you compromise a principal in a **Red Team** across major cloud platforms: **Azure, GCP, and AWS**. This suite is designed to help you determine all your permissions and also what it's possible to accomplish with them, focusing on **privilege escalation** and accessing **sensitive information** 🔥, and other potential attack vectors **without modifying any resources**.
 
-This toolkit leverages advanced techniques to enumerate your permissions (it uses different permission enumeration techniques depending on the cloud) and utilizes insights from **[HackTricks Cloud](https://cloud.hacktricks.wiki/en/index.html)** plus a curated permissions catalog (**Blue-CloudPEASS**) to classify permissions as **critical / high / medium / low**. Optionally, it can use **HackTricks AI** 🤖 to suggest potential attack paths; to minimize data shared, it only sends resource identifiers and **critical/high** permission names (never medium/low). If you prefer not to use the AI, append **`--not-use-hacktricks-ai`** when executing the tools.
+This toolkit leverages advanced techniques to enumerate your permissions (it uses different permission enumeration techniques depending on the cloud) and utilizes insights from **[HackTricks Cloud](https://cloud.hacktricks.wiki/en/index.html)** plus a curated permissions catalog (**Blue-CloudPEASS**) to classify permissions as **critical / high / medium / low**.
 
 ---
 
@@ -46,7 +46,7 @@ python3 ./AzurePEAS.py --help
 
 usage: AzurePEAS.py [-h] [--tenant-id TENANT_ID] [--arm-token ARM_TOKEN] [--graph-token GRAPH_TOKEN] [--foci-refresh-token FOCI_REFRESH_TOKEN] [--not-enumerate-m365] [--skip-entraid]
                     [--username USERNAME] [--password PASSWORD] [--use-username-password] [--check-only-these-subs CHECK_ONLY_THESE_SUBS] [--out-json-path OUT_JSON_PATH]
-                    [--threads THREADS] [--not-use-hacktricks-ai]
+                    [--threads THREADS]
 
 Run AzurePEASS to find all your current privileges in Azure and EntraID and check for potential privilege escalation attacks. To check for Azure permissions an ARM token is needed.
 To check for Entra ID permissions a Graph token is needed.
@@ -72,8 +72,6 @@ options:
   --out-json-path OUT_JSON_PATH
                         Output JSON file path (e.g. /tmp/azure_results.json)
   --threads THREADS     Number of threads to use
-  --not-use-hacktricks-ai
-                        Don't use Hacktricks AI to suggest attack paths
 ```
 
 ### AzurePEAS Usage Examples
@@ -290,9 +288,9 @@ print("Access Token:", creds.token)
 python3 ./GCPPEAS.py --help
 usage: GCPPEAS.py [-h] [--projects PROJECTS | --folders FOLDERS | --organizations ORGANIZATIONS | --service-accounts SERVICE_ACCOUNTS] (--sa-credentials-path SA_CREDENTIALS_PATH |
                 --token TOKEN) [--extra-token EXTRA_TOKEN] [--dont-get-iam-policies] [--skip-bruteforce] [--out-json-path OUT_JSON_PATH] [--threads THREADS]
-                [--not-use-hacktricks-ai] [--billing-project BILLING_PROJECT] [--proxy PROXY] [--print-invalid-permissions]
+                [--billing-project BILLING_PROJECT] [--proxy PROXY] [--print-invalid-permissions]
 
-GCPPEASS: Enumerate GCP permissions and check for privilege escalations and other attacks with HackTricks AI.
+GCPPEASS: Enumerate GCP permissions and check for privilege escalations and other attacks.
 
 options:
   -h, --help            show this help message and exit
@@ -313,8 +311,6 @@ options:
   --out-json-path OUT_JSON_PATH
                         Output JSON file path (e.g. /tmp/gcp_results.json)
   --threads THREADS     Number of threads to use
-  --not-use-hacktricks-ai
-                        Don't use Hacktricks AI to suggest attack paths
   --billing-project BILLING_PROJECT
                         Indicate the billing project to use to brute-force permissions
   --proxy PROXY         Indicate a proxy to use to connect to GCP for debugging (e.g. 127.0.0.1:8080)
@@ -385,7 +381,7 @@ Before running AWSPEAS, ensure that you have:
 python3 ./AWSPEAS.py --help
 
 usage: AWSPEAS.py [-h] (--profile PROFILE | --access-key-id ACCESS_KEY_ID) [--secret-access-key SECRET_ACCESS_KEY] [--session-token SESSION_TOKEN]
-                  [--out-json-path OUT_JSON_PATH] [--threads THREADS] [--not-use-hacktricks-ai] [--debug] --region REGION [--aws-services AWS_SERVICES]
+                  [--out-json-path OUT_JSON_PATH] [--threads THREADS] [--debug] --region REGION [--aws-services AWS_SERVICES]
                   [--skip-iam-policies] [--skip-simulation] [--skip-bruteforce] [--skip-managed-policies-guess]
 
 Run AWSPEASS to find all your current permissions in AWS and check for potential privilege escalation risks. AWSPEASS requires either a profile or AWS credentials (access key + secret key).
@@ -402,8 +398,6 @@ options:
   --out-json-path OUT_JSON_PATH
                         Output JSON file path (e.g. /tmp/aws_results.json)
   --threads THREADS     Number of threads to use
-  --not-use-hacktricks-ai
-                        Don't use Hacktricks AI to suggest attack paths
   --debug               Print more infromation when brute-forcing permissions
   --region REGION       Indicate the region to use for brute-forcing permissions
   --aws-services AWS_SERVICES

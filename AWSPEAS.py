@@ -20,36 +20,8 @@ from src.sensitive_permissions.aws import very_sensitive_combinations, sensitive
 from src.aws.awsbruteforce import AWSBruteForce
 from src.aws.awsmanagedpoliciesguesser import AWSManagedPoliciesGuesser
 
-AWS_MALICIOUS_RESPONSE_EXAMPLE = """[
-    {
-        "Title": "Privilege Escalation via Lambda functions code modification",
-        "Description": "The attacker could create an AWS Lambda functions with a malicious code and then use the permissions of the assigned role to the function function to access other AWS services stealing its token from the metadata.",
-        "Commands": "aws lambda create-function --function-name my_function \
-    --runtime python3.8 --role <arn_of_lambda_role> \
-    --handler lambda_function.lambda_handler \
-    --zip-file fileb://rev.zip",
-        "Permissions": [
-            "lambda:CreateFunction",
-            "iam:PassRole"
-        ],
-    },
-    [...]
-]"""
-
-AWS_SENSITIVE_RESPONSE_EXAMPLE = """[
-    {
-        "permission": "iam:PassRole",
-        "is_very_sensitive": true,
-        "is_sensitive": false,
-        "description": "Allows passing a role to an AWS service, which can lead to privilege escalation if misconfigured."
-    },
-    [...]
-]"""
-
-AWS_CLARIFICATIONS = ""
-
 class AWSPEASS(CloudPEASS):
-    def __init__(self, profile_name, very_sensitive_combos, sensitive_combos, not_use_ht_ai, num_threads, debug, region, aws_services, skip_iam_policies=False, skip_simulation=False, skip_bruteforce=False, skip_managed_policies_guess=False, out_path=None, access_key_id=None, secret_access_key=None, session_token=None):
+    def __init__(self, profile_name, very_sensitive_combos, sensitive_combos, num_threads, debug, region, aws_services, skip_iam_policies=False, skip_simulation=False, skip_bruteforce=False, skip_managed_policies_guess=False, out_path=None, access_key_id=None, secret_access_key=None, session_token=None):
         self.profile_name = profile_name
         self.num_threads = num_threads
         self.region = region
@@ -85,8 +57,7 @@ class AWSPEASS(CloudPEASS):
         self.principal_arn = self.get_caller_identity()
         self.principal_type, self.principal_name = self.parse_principal(self.principal_arn)
 
-        super().__init__(very_sensitive_combos, sensitive_combos, "AWS", not_use_ht_ai, num_threads,
-                         AWS_MALICIOUS_RESPONSE_EXAMPLE, AWS_SENSITIVE_RESPONSE_EXAMPLE, AWS_CLARIFICATIONS, out_path)
+        super().__init__(very_sensitive_combos, sensitive_combos, "AWS", num_threads, out_path)
 
     def get_caller_identity(self):
         try:
@@ -797,7 +768,6 @@ if __name__ == "__main__":
     parser.add_argument('--session-token', help="AWS Session Token (optional, for temporary credentials)")
     parser.add_argument('--out-json-path', default=None, help="Output JSON file path (e.g. /tmp/aws_results.json)")
     parser.add_argument('--threads', default=10, type=int, help="Number of threads to use")
-    parser.add_argument('--not-use-hacktricks-ai', action="store_true", default=False, help="Don't use Hacktricks AI to suggest attack paths")
     parser.add_argument('--debug', default=False, action="store_true", help="Print more infromation when brute-forcing permissions")
     parser.add_argument('--region', required=True, help="Indicate the region to use for brute-forcing permissions")
     parser.add_argument('--aws-services', help="Filter AWS services to brute-force permissions for indicating them as a comma separated list (e.g. --aws-services s3,ec2,lambda,rds,sns,sqs,cloudwatch,cloudfront,iam,dynamodb)")
@@ -833,7 +803,6 @@ if __name__ == "__main__":
         profile,
         very_sensitive_combinations,
         sensitive_combinations,
-        not_use_ht_ai=args.not_use_hacktricks_ai,
         num_threads=args.threads,
         debug=args.debug,
         region=args.region,

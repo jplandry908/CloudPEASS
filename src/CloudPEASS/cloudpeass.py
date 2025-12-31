@@ -1,15 +1,12 @@
 import json
-import requests
 from collections import defaultdict
 from tqdm import tqdm
 import time
-import requests
 import fnmatch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import pdb
 import faulthandler
-import tiktoken
 from pathlib import Path
 import yaml
 from typing import Optional
@@ -20,8 +17,6 @@ from .permission_risk_classifier import classify_all, classify_permission
 
 init(autoreset=True)
 faulthandler.enable()
-
-HACKTRICKS_AI_ENDPOINT = "https://www.hacktricks.ai/api/ht-api"
 
 
 class CloudResource:
@@ -66,70 +61,6 @@ class CloudResource:
         # Everything else goes to extra_fields
         return cls(resource_id, name, resource_type, permissions, deny_perms, is_admin, **data)
 
-SENSITIVE_RESPONSE_FORMAT = """\n
-### RESPONSE FORMAT
-Your complete response must be a valid JSON with the following format:
-
-[
-    {
-        "permission": "Permission string",
-        "is_very_sensitive": true/false,
-        "is_sensitive": true/false,
-        "description": "Description of why it is sensitive"
-    },
-    [...]
-]
-
-
-### EXAMPLE RESPONSE
-
-__CLOUD_SPECIFIC_EXAMPLE__
-
-
-### CLARIFICATIONS
-Remember to indicate as many sensitive permissions as possible.
-Always recheck the permissions and their descriptions to ensure they are correct and avoid false positives.
-Your response MUST be a valid JSON with the indicated format (an array of dicts with the keys "permission", "is_very_sensitive", "is_sensitive" and "description").
-If no malicious actions are found, please provide an empty JSON array: []
-__CLOUD_SPECIFIC_CLARIFICATIONS__
-
-"""
-
-MALICIOUS_ACTIONS_RESPONSE_FORMAT = """\n
-### RESPONSE FORMAT
-
-Your complete response must be a valid JSON with the following format:
-[
-    {
-        "Title": "Malicious Action Title",
-        "Description": "Description of the malicious action",
-        "Commands": "Bash commands (using azure-cli, aws-cli, gcloud, etc.) to perform the malicious action",
-        "Permissions": [
-            "Permission 1",
-            "Permission 2",
-            ...
-        ]
-    },
-    [...]
-]
-
-### EXAMPLE RESPONSE
-
-__CLOUD_SPECIFIC_EXAMPLE__
-
-
-### CLARIFICATIONS
-- Remember to indicate as many malicious actions as possible (maximum 3) that can be performed with the given set of permissions, and provide the necessary commands to perform them.
-- With a maximum of 3 techniques, prioritize privilege escalation and then sensitive information exfiltration techniques over deletion or DoS attacks.
-- If more than one command is needed, just separate them with a newline character or a semi-colon inside the JSON field.
-- Report only attacks whose most important permissions are assigned to the user and indicated. You can always suppose that the user has other necessary read, list or invoke permissions but not write permissions that haven't been indicated.
-- Always recheck the response to ensure it's correct and avoid false positives.
-- In the "Permissions" field indicate the most important permissions needed to perform each attack that the user has.
-- Your response MUST be a valid JSON with the indicated format (an array of dicts with the keys "Title", "Description", "Commands" and "Permissions).
-- If no malicious actions are found, please provide an empty JSON array as response: []
-"""
-
-
 def my_thread_excepthook(args):
     print(f"Exception in thread {args.thread.name}: {args.exc_type.__name__}: {args.exc_value}")
     # Start the post-mortem debugger session.
@@ -139,23 +70,13 @@ threading.excepthook = my_thread_excepthook
 
 
 class CloudPEASS:
-    def __init__(self, very_sensitive_combos, sensitive_combos, cloud_provider, not_use_ht_ai, num_threads, example_malicious_cloud_response, example_sensitive_cloud_response, sensitive_perms_clarifications="", out_path=None):
+    def __init__(self, very_sensitive_combos, sensitive_combos, cloud_provider, num_threads, out_path=None):
         self.very_sensitive_combos = [set(combo) for combo in very_sensitive_combos]
         self.sensitive_combos = [set(combo) for combo in sensitive_combos]
         self.cloud_provider = cloud_provider
-        self.not_use_ht_ai = not_use_ht_ai
         self.num_threads = int(num_threads)
         self.out_path = out_path
         self.principal_info = {}
-        self.malicious_actions_response_format = MALICIOUS_ACTIONS_RESPONSE_FORMAT.replace("__CLOUD_SPECIFIC_EXAMPLE__", example_malicious_cloud_response)
-        self.sensitive_response_format = SENSITIVE_RESPONSE_FORMAT.replace("__CLOUD_SPECIFIC_EXAMPLE__", example_sensitive_cloud_response).replace("__CLOUD_SPECIFIC_CLARIFICATIONS__", sensitive_perms_clarifications)
-        self._rate_limit_lock = threading.Lock()
-        self._request_timestamps = []
-    
-    def get_len_tokens(self, prompt) -> int:
-        model="o3"
-        encoding = tiktoken.encoding_for_model(model)
-        return len(encoding.encode(prompt))
 
     def get_resources_and_permissions(self):
         """
@@ -336,237 +257,6 @@ class CloudPEASS:
 
 
 
-    def find_attacks_from_permissions(self, analysis_results):
-        """
-        Query Hacktricks AI to get attacks based on the given permissions.
-
-        Args:
-            analysis_results (dict): Analysis results containing permissions and resources.
-
-        Returns:
-            dict: Analysis result containing impact description or None if nothing found.
-        """
-
-        query_text = "#### REQUEST\n"
-        query_text += "What actions could an attacker perform with the following permissions to escalate privileges (escalate to another user, group or managed identity/role/service account or get more permissions somehow inside the cloud or inside the cloud service), access sensitive information from the could (env vars, connection strings, secrets, dumping buckets or disks... any kind of data storage)?"
-        query_text += "\n\nNOTE: For safety and to minimize data shared, ONLY critical/high permissions are provided below. Medium/low/other permissions are NOT sent to HackTricks AI."
-        query_text += "\n\n"
-
-        query_text_perms = "#### IDENTIFIED PERMISSIONS\n"
-        for result in analysis_results:
-            # Get resources
-            resources = result['resources']
-            sum_resources = self.sumarize_resources(resources)
-            if sum_resources:
-                query_text_perms += f"Over the following resources: {', '.join(sum_resources.values())} these permissions were identified:\n"
-
-            # Get permissions
-            all_very_sensitive_perms = set()
-            all_sensitive_perms = set()
-            perms_cat = result.get("permissions_cat") or {}
-            critical = sorted(set(perms_cat.get("critical") or []))
-            high = sorted(set(perms_cat.get("high") or []))
-
-            all_very_sensitive_perms.update(critical)
-            all_sensitive_perms.update(high)
-
-            if all_very_sensitive_perms:
-                query_text_perms += f"- Critical permissions: {', '.join(sorted(all_very_sensitive_perms))}\n"
-            if all_sensitive_perms:
-                query_text_perms += f"- High permissions: {', '.join(sorted(all_sensitive_perms))}\n"
-
-            if any(perm.startswith("-") for perm in list(all_sensitive_perms) + list(all_very_sensitive_perms)):
-                query_text_perms += "- Note that permissions starting with '-' are deny permissions.\n"
-            
-            query_text_perms += "\n\n"
-        
-        query_text += query_text_perms
-        query_text += self.malicious_actions_response_format
-
-        result = self.query_hacktricks_ai(query_text)
-        final_results = []
-
-        if not result:
-            return []
-        
-        # Re-check response to ensure it's correct and avoid false positives
-        query_text = "### Context\n"
-        query_text = f"You have been asked previously to provide the malicious actions that could be performed with the following {self.cloud_provider} permissions:\n\n"
-        query_text += query_text_perms
-        query_text += "### Your response was:\n"
-        query_text += json.dumps(result, indent=2)
-        query_text += "\n\n### Indications\n"
-        query_text += "- Check the given response to ensure it's correct and remove false positives.\n"
-        query_text += "- Your new response should only contain valid potential attacks based on the given permissions.\n"
-        query_text += "- Report only attacks whose most important permissions are assigned to the user and indicated. You can always suppose that the user has other read, list or invoke permissions that are not indicated here, but all the write permissions have been indicated.\n"
-        query_text += "- If a reported attack uses write or sensitive permissions that the user doesn't have (not indicated), it's a false possitive.\n"
-        query_text += "- If the mentioned permissions for an attack are wrong, re-evaluate it.\n"
-        query_text += "- Answer with a new JSON keeping the valid attacks, removing the false positives if any, and adding more attacks if anyone was missed.\n"
-        query_text += "- If no malicious actions are found, please provide an empty JSON array as your reponse: []\n"
-        query_text += self.malicious_actions_response_format
-        result = self.query_hacktricks_ai(query_text)
-
-        for entry in result:
-            if not all(key in entry for key in ["Title", "Description", "Commands"]):
-                print("Malformed response from Hacktricks AI: {}".format(entry))
-            else:
-                final_results.append({
-                    "title": entry["Title"],
-                    "description": entry["Description"],
-                    "commands": entry["Commands"],
-                    "permissions": entry["Permissions"]
-                })
-
-        return final_results
-    
-    def analyze_sensitive_combinations_ai(self, permissions):
-        if not permissions:
-            return {
-                "very_sensitive_perms": [],
-                "sensitive_perms": []
-            }
-        
-        # Split permissions into chunks based on token count
-        chunks = []
-        current_chunk = []
-        max_tokens_per_chunk = 30000
-
-        # Process permissions in batches of 100
-        batch_size = 100
-        permissions_list = list(permissions)
-        for i in range(0, len(permissions_list), batch_size):
-            batch = permissions_list[i:i + batch_size]
-            
-            # Check if adding this batch would exceed token limit
-            test_tokens = self.get_len_tokens(', '.join(current_chunk + batch))
-            
-            if test_tokens > max_tokens_per_chunk and current_chunk:
-                # Current chunk is full, start a new one with this batch
-                chunks.append(current_chunk)
-                current_chunk = batch
-            else:
-                # Add the batch to current chunk
-                current_chunk.extend(batch)
-        
-        # Add the last chunk if it has permissions
-        if current_chunk:
-            chunks.append(current_chunk)
-        
-        # Limit to first 5 chunks
-        if len(chunks) > 5:
-            print(f"{Fore.YELLOW}Warning: Too many permissions ({len(chunks)} chunks). Only analyzing the first 5 chunks of permissions.")
-            chunks = chunks[:5]
-        
-        final_result = {
-            "very_sensitive_perms": [],
-            "sensitive_perms": []
-        }
-        
-        # Process each chunk
-        for i, chunk in enumerate(chunks):
-            print(f"{Fore.WHITE}Analyzing permission chunk {i+1}/{len(chunks)} with AI ({len(chunk)} permissions)...")
-            
-            query_text = f"Given the following {self.cloud_provider} permissions: {', '.join(chunk)}\n"
-            query_text += "Indicate if any of those permissions are very sensitive or sensitive permissions. A very sensitive permission is a permission that allows to escalate privileges or read sensitive information that allows to escalate privileges like credentials or secrets. A sensitive permission is a permission that could be used to escalate privileges, read sensitive information or perform other cloud attacks, but it's not clear if it's enough by itself. A regular read permission that doesn't allow to read sensitive information (credentials, secrets, API keys...) is not sensitive.\n"
-            query_text += "Note that permissions starting with '-' are deny permissions.\n"
-            query_text += self.sensitive_response_format
-            
-            result = self.query_hacktricks_ai(query_text)
-            
-            if result:
-                for entry in result:
-                    if not all(key in entry for key in ["permission", "is_very_sensitive", "is_sensitive", "description"]):
-                        print(f"Malformed response from Hacktricks AI: {entry}")
-                    else:
-                        if entry["is_very_sensitive"]:
-                            final_result["very_sensitive_perms"].append(entry["permission"])
-                        elif entry["is_sensitive"]:
-                            final_result["sensitive_perms"].append(entry["permission"])
-    
-        return final_result
-
-
-
-    def query_hacktricks_ai(self, msg, cont=0):
-        """
-        Query Hacktricks AI to analyze malicious actions for a message.
-
-        Args:
-            msg (str): Message to query Hacktricks AI.
-
-        Returns:
-            dict: Analysis result containing impact description or None if nothing found.
-        """
-        max_requests = 5
-        window = 61  # seconds
-
-        # Enforce global rate limit across threads
-        while True:
-            with self._rate_limit_lock:
-                now = time.time()
-                # Remove timestamps that are outside the 60-second window
-                self._request_timestamps = [
-                    t for t in self._request_timestamps if now - t < window
-                ]
-                if len(self._request_timestamps) < max_requests:
-                    # Log the current request timestamp
-                    self._request_timestamps.append(now)
-                    break  # allowed to proceed
-                else:
-                    # Calculate wait time until the earliest timestamp exits the window
-                    earliest = min(self._request_timestamps)
-                    wait_time = window - (now - earliest)
-            # Wait outside the lock to allow other threads to update
-            time.sleep(wait_time)
-
-        start_time = time.time()
-        try:
-            response = requests.post(HACKTRICKS_AI_ENDPOINT, json={"query": msg}, timeout=420)
-        except requests.exceptions.ConnectionError as e:
-            if "429" in str(e):
-                print(f"{Fore.RED}Error connecting to Hacktricks AI: {e}")
-                print(f"{Fore.YELLOW}Rate limit exceeded. Retrying in 60 seconds...")
-                time.sleep(60)
-                return self.query_hacktricks_ai(msg, cont=cont+1)
-            
-            else:
-                print(f"{Fore.RED}Error connecting to Hacktricks AI: {e}")
-                
-            if cont < 3:
-                print(f"{Fore.YELLOW}Trying again...")
-                time.sleep(10)
-                return self.query_hacktricks_ai(msg, cont=cont+1)
-            return None
-        elapsed = time.time() - start_time
-
-        if response.status_code != 200:
-            print(f"{Fore.RED}Error querying Hacktricks AI: {response.status_code}, {response.text}")
-            if cont < 3:
-                print(f"{Fore.YELLOW}Trying again...")
-                time.sleep(10)
-                return self.query_hacktricks_ai(msg, cont=cont+1)
-            return None
-
-        try:
-            result = response.json()
-            result = result.get("response").strip()
-            if result.startswith("```"):
-                result = "\n".join(result.split("\n")[1:])
-            if result.endswith("```"):
-                result = "\n".join(result.split("\n")[:-1])
-            result = json.loads(result)
-        except Exception as e:
-            print(f"{Fore.RED}Error parsing response from Hacktricks AI: {e}\nResponse: {response.text}")
-            if cont < 3:
-                if cont > 0:
-                    print(f"{Fore.YELLOW}Trying again...")
-                time.sleep(5)
-                msg += f"\n\n### Indications\n- You gave an wrongly formatted response. Fix the response so the format is like the expected JSON indicated.\n- Your invalid response was:\n\n{response.text}\n\n"
-                return self.query_hacktricks_ai(msg, cont=cont+1)
-            return None
-
-        return result
-
     def analyze_group(self, perms_set, resources_group):
         sensitive_perms = self.analyze_sensitive_combinations(perms_set)
         sensitive_perms_serializable = {
@@ -731,64 +421,6 @@ class CloudPEASS:
         if not analysis_results:
             print(f"{Fore.RED}No permissions found. Exiting.")
 
-        # Proceed with Hacktricks AI check if enabled
-        elif self.out_path:
-            print(f"{Fore.GREEN}JSON output specified. Skipping Hacktricks AI analysis (results saved to {self.out_path}).")
-        
-        elif self.not_use_ht_ai:
-            print(f"{Fore.YELLOW}Hacktricks AI analysis disabled. Skipping Hacktricks AI recommendations.")
-        
-        elif has_admin:
-            pass  # Skip HackTricks AI when admin access is detected
-        
-        elif not all_critical_perms and not all_high_perms:
-            print(f"{Fore.GREEN}\nNo critical or high-risk permissions found. Skipping Hacktricks AI analysis.")
-            print(f"{Fore.BLUE}Your permissions appear to be low-risk. No privilege escalation paths detected.")
-        
-        else:
-
-            print(f"{Fore.MAGENTA}\nQuerying Hacktricks AI for attacks, sit tight!")
-
-            hacktricks_analysis = self.find_attacks_from_permissions(analysis_results)
-
-            if not hacktricks_analysis:
-                print(f"{Fore.YELLOW}No attacks found for the given permissions.")
-
-            else:
-                print(f"{Fore.YELLOW}\n" + "="*80)
-                print(f"{Fore.YELLOW}⚠️  WARNING: The following attack vectors are AI-GENERATED suggestions.")
-                print(f"{Fore.YELLOW}They may contain inaccuracies, hallucinations, or false positives.")
-                print(f"{Fore.YELLOW}Always verify the information and test commands carefully before use.")
-                print(f"{Fore.YELLOW}" + "="*80 + f"{Style.RESET_ALL}\n")
-                for attack in hacktricks_analysis:
-                    print(f"{Fore.BLUE}\nTitle: {Fore.WHITE}{attack['title']}")
-                    print(f"{Fore.BLUE}Description: {Fore.WHITE}{attack['description']}")
-                    
-                    # Color permissions based on their sensitivity level
-                    perms_msg = f"{Fore.BLUE}Permissions: "
-                    for perm in attack['permissions']:
-                        # Check for wildcards first (*, service:*, *:action, etc.)
-                        if '*' in perm:
-                            perms_msg += f"{Fore.RED}{Back.YELLOW}{perm}{Style.RESET_ALL}, "
-                        elif perm in all_critical_perms:
-                            perms_msg += f"{Fore.RED}{Back.YELLOW}{perm}{Style.RESET_ALL}, "
-                        elif perm in all_high_perms:
-                            perms_msg += f"{Fore.RED}{perm}{Style.RESET_ALL}, "
-                        elif perm in all_medium_perms:
-                            perms_msg += f"{Fore.YELLOW}{perm}{Style.RESET_ALL}, "
-                        else:
-                            perms_msg += f"{Fore.WHITE}{perm}{Style.RESET_ALL}, "
-                    
-                    perms_msg = perms_msg.strip()
-                    if perms_msg.endswith(","):
-                        perms_msg = perms_msg[:-1]
-                    print(perms_msg)
-                    
-                    print(f"{Fore.BLUE}Commands: {Fore.WHITE}{attack['commands']}\n")
-                    # Append to output lines for later printing
-                    print(Fore.LIGHTWHITE_EX + "-" * 80 + "\n" + Style.RESET_ALL)
-                
-        
         # Exit successfully
         print(f"{Fore.GREEN}\nAnalysis completed successfully!")
         print()
